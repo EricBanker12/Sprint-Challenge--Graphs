@@ -42,9 +42,9 @@ def get_shortest_path(world):
     r = multiprocessing.Queue()
     jobs = []
 
-    q.put((set(), [], world.starting_room))
+    q.put((world.starting_room, []))
     
-    for i in range(1, os.cpu_count()):
+    for i in range(os.cpu_count() // 2):
         p = multiprocessing.Process(target=path_finder, args=(world, q, r))
         jobs.append(p)
         p.start()
@@ -66,37 +66,44 @@ def get_shortest_path(world):
 def path_finder(world, q, r):
     while True:
         try:
-            visited, path, room = q.get(True, 0.5)
+            room, path = q.get(True, 0.5)
         except:
             break
 
-        visited = visited.copy()
-        visited.add(room.id)
         path = [*path, room.id]
 
-        if len(visited) < len(world.rooms):
+        if len(path) > 960:
+            break
+
+        if len(set(path)) < len(world.rooms):
             dead_end = True
             for direction in room.get_exits():
                 next_room = room.get_room_in_direction(direction)
                 if next_room:
-                    if not next_room.id in visited:
-                        q.put((visited, path, next_room))
+                    if not next_room.id in path:
+                        q.put((next_room, path))
                         dead_end = False
             
             if dead_end:
-                next_room, next_path = get_shortest_unvisited_path(visited, path, room)
-                q.put((visited, next_path, next_room))
+                next_q = get_shortest_unvisited_path(room, path)
+                if next_q:
+                    q.put(next_q)
+                else:
+                    break
         else:
             r.put(path)
 
-def get_shortest_unvisited_path(visited, path, room):
+def get_shortest_unvisited_path(room, path):
     """return shortest path to a room adjacent to unvisited rooms"""
+    visited = set(path)
     temp_visited = set()
     q = queue.Queue()
     q.put((room, path))
 
     while True:
         room, path = q.get()
+        if len(path) > 960:
+            return None
         if not room.id in temp_visited:
             temp_visited.add(room.id)
             for direction in room.get_exits():
@@ -109,13 +116,12 @@ def main():
     # Load world
     world = World()
 
-
     # You may uncomment the smaller graphs for development and testing purposes.
     # map_file = "maps/test_line.txt"
     # map_file = "maps/test_cross.txt"
     # map_file = "maps/test_loop.txt"
-    map_file = "maps/test_loop_fork.txt"
-    # map_file = "maps/main_maze.txt"
+    # map_file = "maps/test_loop_fork.txt"
+    map_file = "maps/main_maze.txt"
 
     # Loads the map into a dictionary
     room_graph=literal_eval(open(map_file, "r").read())
@@ -131,9 +137,7 @@ def main():
     traversal_path = []
 
     print('start')
-    # traversal_path = get_directions([0,1,2,1,0,3,4,3,0,7,8,9,10,11,6,5])
     start_time = time.time()
-    # print(get_shortest_path(world))
     traversal_path = get_directions(world, get_shortest_path(world))
     print('traversal_path', traversal_path)
     print('stop', time.time() - start_time)
