@@ -34,6 +34,26 @@ def get_path_always_right():
     # while len(visited) < len(world.rooms):
     pass
 
+def get_path_within_limit(world, limit=960):
+    """return shortest path to visit all rooms"""
+
+    q = multiprocessing.Queue()
+    r = multiprocessing.Queue()
+    jobs = []
+
+    q.put((world.starting_room, []))
+    
+    for i in range(1, os.cpu_count()):
+        p = multiprocessing.Process(target=path_finder, args=(world, q, r, limit))
+        jobs.append(p)
+        p.start()
+
+    path = r.get(True)
+
+    for p in jobs:
+        p.kill()
+
+    return path
 
 def get_shortest_path(world):
     """return shortest path to visit all rooms"""
@@ -63,7 +83,7 @@ def get_shortest_path(world):
     
     return min_path
 
-def path_finder(world, q, r):
+def path_finder(world, q, r, limit=960):
     while True:
         try:
             room, path = q.get(True, 0.5)
@@ -72,7 +92,7 @@ def path_finder(world, q, r):
 
         path = [*path, room.id]
 
-        if len(path) > 960:
+        if len(path) > limit:
             break
 
         if len(set(path)) < len(world.rooms):
@@ -85,7 +105,7 @@ def path_finder(world, q, r):
                         dead_end = False
             
             if dead_end:
-                next_q = get_shortest_unvisited_path(room, path)
+                next_q = get_shortest_unvisited_path(room, path, limit)
                 if next_q:
                     q.put(next_q)
                 else:
@@ -93,7 +113,7 @@ def path_finder(world, q, r):
         else:
             r.put(path)
 
-def get_shortest_unvisited_path(room, path):
+def get_shortest_unvisited_path(room, path, limit=960):
     """return shortest path to a room adjacent to unvisited rooms"""
     visited = set(path)
     temp_visited = set()
@@ -102,7 +122,7 @@ def get_shortest_unvisited_path(room, path):
 
     while True:
         room, path = q.get()
-        if len(path) > 960:
+        if len(path) > limit:
             return None
         if not room.id in temp_visited:
             temp_visited.add(room.id)
@@ -134,13 +154,10 @@ def main():
 
     # Fill this out with directions to walk
     # traversal_path = ['n', 'n']
-    traversal_path = []
-
-    print('start')
     start_time = time.time()
-    traversal_path = get_directions(world, get_shortest_path(world))
-    print('traversal_path', traversal_path)
-    print('stop', time.time() - start_time)
+    traversal_path = get_directions(world, get_path_within_limit(world, 960))
+    print(f'traversal_path:\n{traversal_path}\n{len(traversal_path)} directions')
+    print(f'{time.time() - start_time:.1}s')
 
     # TRAVERSAL TEST
     visited_rooms = set()
