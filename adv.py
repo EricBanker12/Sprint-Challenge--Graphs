@@ -10,13 +10,13 @@ import time
 
 from ast import literal_eval
 
-def get_directions(world, path):
-    """return list of directions for given path"""
+def get_directions(path):
+    """return list of directions for given path of rooms"""
     directions = []
 
     for i in range(len(path) - 1):
-        room = world.rooms[path[i]]
-        next_room = world.rooms[path[i + 1]]
+        room = path[i]
+        next_room = path[i + 1]
 
         for direction in room.get_exits():
             if next_room == room.get_room_in_direction(direction):
@@ -24,27 +24,14 @@ def get_directions(world, path):
 
     return directions
 
-def get_path_always_right():
-    """return path for always going right, backtrack at dead ends or already visited"""
-    # visited = set()
-    # stack = [world.starting_room]
-    # path = [world.starting_room]
-    # direction = world.starting_room.get_exits()[0]
-    
-    # while len(visited) < len(world.rooms):
-    pass
+def get_path_within_limit(world, limit=None):
+    """return a path to visit all rooms within a limit"""
 
-def get_path_within_limit(world, limit=960):
-    """return shortest path to visit all rooms"""
-
-    q = multiprocessing.Queue()
     r = multiprocessing.Queue()
     jobs = []
-
-    q.put((world.starting_room, []))
     
     for i in range(1, os.cpu_count()):
-        p = multiprocessing.Process(target=path_finder, args=(world, q, r, limit))
+        p = multiprocessing.Process(target=path_finder_dft, args=(world, r, limit))
         jobs.append(p)
         p.start()
 
@@ -62,15 +49,17 @@ def get_shortest_path(world):
     r = multiprocessing.Queue()
     jobs = []
 
-    q.put((world.starting_room, []))
+    q.put(([world.starting_room], set([world.starting_room.id])))
     
-    for i in range(os.cpu_count() // 2):
-        p = multiprocessing.Process(target=path_finder, args=(world, q, r))
-        jobs.append(p)
-        p.start()
+    # for i in range(1, os.cpu_count()):
+    #     p = multiprocessing.Process(target=path_finder, args=(world, q, r))
+    #     jobs.append(p)
+    #     p.start()
 
-    for p in jobs:
-        p.join()
+    # for p in jobs:
+    #     p.join()
+
+    path_finder(world, q, r)
 
     min_length = None
     min_path = None
@@ -83,54 +72,91 @@ def get_shortest_path(world):
     
     return min_path
 
-def path_finder(world, q, r, limit=960):
+def path_finder(world, q, r, limit=None):
+    """self contained bft for multiprocessing"""
     while True:
         try:
-            room, path = q.get(True, 0.5)
+            path, visited = q.get(True, 0.5)
         except:
             break
 
-        path = [*path, room.id]
+        room = path[-1]
 
-        if len(path) > limit:
-            break
+        if limit:
+            if len(path) > limit:
+                break
 
-        if len(set(path)) < len(world.rooms):
+        if len(visited) < len(world.rooms):
             dead_end = True
             for direction in room.get_exits():
                 next_room = room.get_room_in_direction(direction)
                 if next_room:
-                    if not next_room.id in path:
-                        q.put((next_room, path))
+                    if not next_room.id in visited:
+                        next_path = [*path, next_room]
+                        next_visited = visited.copy()
+                        next_visited.add(next_room.id)
+                        q.put((next_path, next_visited))
                         dead_end = False
             
             if dead_end:
-                next_q = get_shortest_unvisited_path(room, path, limit)
-                if next_q:
-                    q.put(next_q)
+                next_path = get_shortest_unvisited_path(path, visited, limit)
+                if next_path:
+                    q.put((next_path, visited))
                 else:
                     break
         else:
             r.put(path)
 
-def get_shortest_unvisited_path(room, path, limit=960):
-    """return shortest path to a room adjacent to unvisited rooms"""
-    visited = set(path)
+def path_finder_dft(world, r, limit=None):
+    """self contained dft for multiprocessing"""
+    while True: # infinite loop until process kill
+        room = world.starting_room
+        path = [room]
+        visited = set()
+        visited.add(room.id)
+
+        while True: # dft using path as stack without popping
+            if len(visited) < len(world.rooms):
+                room = path[-1]
+
+                if limit:
+                    if len(path) > limit:
+                        break
+
+                # get adjacent unvisited room
+                rooms = map(room.get_room_in_direction, room.get_exits())
+                rooms = [*filter(lambda room: not room.id in visited, rooms)]
+                if len(rooms):
+                    next_room = random.choice(rooms)
+                    path.append(next_room)
+                    visited.add(next_room.id)
+                else:
+                    path = get_shortest_unvisited_path(path, visited, limit)
+                    if not path:
+                        break
+            else:
+                r.put(path)
+                break
+
+def get_shortest_unvisited_path(path, visited, limit=None):
+    """return path extended by shortest path to a room adjacent to unvisited rooms"""
     temp_visited = set()
     q = queue.Queue()
-    q.put((room, path))
+    q.put(path)
 
     while True:
-        room, path = q.get()
-        if len(path) > limit:
-            return None
+        path = q.get()
+        room = path[-1]
+        if limit:
+            if len(path) > limit:
+                return None
         if not room.id in temp_visited:
             temp_visited.add(room.id)
             for direction in room.get_exits():
                 next_room = room.get_room_in_direction(direction)
                 if not next_room.id in visited:
-                    return (room, path)
-                q.put((next_room, [*path, next_room.id]))
+                    return path
+                q.put([*path, next_room])
 
 def main():
     # Load world
@@ -154,10 +180,14 @@ def main():
 
     # Fill this out with directions to walk
     # traversal_path = ['n', 'n']
+
     start_time = time.time()
-    traversal_path = get_directions(world, get_path_within_limit(world, 960))
-    print(f'traversal_path:\n{traversal_path}\n{len(traversal_path)} directions')
-    print(f'{time.time() - start_time:.1}s')
+    
+    # traversal_path = get_directions(get_shortest_path(world))
+    traversal_path = get_directions(get_path_within_limit(world, 960))
+    
+    print(f'{(time.time() - start_time):.2f}s')
+    # print(f'traversal_path:\n{traversal_path}')
 
     # TRAVERSAL TEST
     visited_rooms = set()
